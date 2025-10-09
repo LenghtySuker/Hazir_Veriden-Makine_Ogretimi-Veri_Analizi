@@ -81,6 +81,16 @@ Bu projede kullanılan veri seti Kaggle üzerinden alınmıştır:
 Veri seti ilgili sahibine aittir ve bu kod yalnızca analiz amaçlı kullanılmıştır.
 
 
+## 📦 Veri Dosyası
+
+Bu projede kullanılan veri dosyası Kaggle üzerinden indirilmiştir ve yerel olarak şu dizinde tutulmaktadır:
+
+`C:\Users\Aykut\.cache\kagglehub\datasets\dasgroup\rba-dataset\versions\1\rba-dataset.csv`
+
+Veri dosyası GitHub’a yüklenmemiştir.  
+Projeyi çalıştırmak için Kaggle hesabınızla [rba-dataset](https://www.kaggle.com/datasets/dasgroup/rba-dataset) sayfasından veriyi indirmeniz ve kodda `dosya_yolu` değişkenini kendi sisteminize göre güncellemeniz gerekmektedir.
+
+
 
 \## ⚙️ Kurulum
 
