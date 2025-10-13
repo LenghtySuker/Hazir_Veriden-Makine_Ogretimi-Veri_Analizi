@@ -20,17 +20,15 @@ Aşağıdaki 7 sabit özellik üzerine analiz ve tahminler yapılmıştır:
 
 1\. \*\*OS/Device Bazlı Tahmin\*\*  
 
-2\. \*\*Saat/Gün Bazlı Tahmin\*\*  
+2\. \*\*Saat/Gün Bazlı Tahmin Ve En Yoğun 10 Gün ve Saati Verisi\*\*  
 
 3\. \*\*Gelecek Hafta Tahmini\*\*  
 
-4\. \*\*Kullanıcı Bazlı Saat/Gün Tahmini\*\*  
+4\. \*\*OS/Device Bazlı Login Sayısı Tahmini (Zaman Serisi)\*\*  
 
-5\. \*\*OS/Device Bazlı Login Sayısı Tahmini (Zaman Serisi)\*\*  
+5\. \*\*Anomali Tespiti\*\*  
 
-6\. \*\*Anomali Tespiti\*\*  
-
-7\. \*\*Benzer Login Davranışları\*\*
+6\. \*\*Benzer Login Davranışları\*\*
 
 
 
@@ -56,13 +54,9 @@ Bu projede aşağıdaki Python kütüphaneleri kullanılmıştır:
 
 \- `prophet`: Zaman serisi tahmini  
 
-\- `matplotlib`, `seaborn`: Görselleştirme  
-
 \- `logging`: Uyarı ve hata mesajlarını bastırma
 
 
-
-\## 📊 Görselleştirme
 
 
 
