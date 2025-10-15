@@ -6,78 +6,73 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, Isol
 from sklearn.cluster import KMeans
 from prophet import Prophet
 import logging
-import matplotlib.pyplot as plt
 import warnings
 from sklearn.metrics import mean_squared_error
-import numpy as np
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error
-from sklearn.metrics import accuracy_score
-
-
+from pykalman import KalmanFilter
+import matplotlib.pyplot as plt
 logging.getLogger('prophet').setLevel(logging.ERROR) 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 logging.getLogger('cmdstanpy').setLevel(logging.WARNING)
+logging.getLogger("cmdstanpy").disabled = True
+logging.getLogger("prophet").disabled = True
 
 # ---------------- Veri Yükleme ----------------
 dosya_yolu = r"C:\Users\Aykut\.cache\kagglehub\datasets\dasgroup\rba-dataset\versions\1\rba-dataset.csv"
 df = pd.read_csv(dosya_yolu, nrows=2_000_000)
 
+# Temizlik ve dönüşümler
 df["Login Successful"] = df["Login Successful"].astype(int)
 df = df.fillna("Bilinmiyor")
 df["Round-Trip Time [ms]"] = pd.to_numeric(df["Round-Trip Time [ms]"], errors="coerce").fillna(0)
 df['Login Timestamp'] = pd.to_datetime(df['Login Timestamp'], errors='coerce')  
 df['saat'] = df['Login Timestamp'].dt.hour
-df['gun'] = df['Login Timestamp'].dt.dayofweek  
+df['gun'] = df['Login Timestamp'].dt.dayofweek
 
-gun_dict = {0: 'Pazartesi', 1: 'Salı', 2: 'Çarşamba', 3: 'Perşembe', 4: 'Cuma', 5: 'Cumartesi', 6: 'Pazar'} 
+# 🔹 1 yıllık (2020-02-01 → 2021-02-01) veriyi filtrele
+df_2020 = df[(df['Login Timestamp'] >= '2020-02-01') & (df['Login Timestamp'] <= '2021-02-01')]
 
-# ---------------- Label Encoding ----------------
-label_cols = ["OS Name and Version", "Device Type", "Browser Name and Version", "Country", "Region", "City", "ASN"]  
+gun_dict = {0: 'Pazartesi', 1: 'Salı', 2: 'Çarşamba', 3: 'Perşembe', 4: 'Cuma', 5: 'Cumartesi', 6: 'Pazar'}
+
+# Label Encoding
+from sklearn.preprocessing import LabelEncoder
+label_cols = ["OS Name and Version", "Device Type", "Browser Name and Version", "Country", "Region", "City", "ASN"]
 encoders = {}
-for col in label_cols:  
-    le = LabelEncoder()
-    df[col+'_enc'] = le.fit_transform(df[col].astype(str))
-    encoders[col] = le
-
+for col in label_cols:
+    df[col] = df[col].astype(str)
+    encoders[col] = LabelEncoder()
+    df[col+'_enc'] = encoders[col].fit_transform(df[col])
 # ---------------- Fonksiyonlar ----------------
 def os_device_model(df):
-    X = df[[col+'_enc' for col in ["OS Name and Version", "Device Type"]]]
-    y = df["Login Successful"]
-    
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
+    X = df[[col+'_enc' for col in ["OS Name and Version", "Device Type"]]]  # Veri setinden OS ve Cihaz tipine ait sayısal olarak encode edilmiş sütunları alıyoruz
+    y = df["Login Successful"]  # Girişin başarılı olup olmadığını (1 veya 0) hedef değişken olarak seçiyoruz
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42) 
     model = RandomForestClassifier(n_estimators=300, max_depth=20, random_state=42, n_jobs=-1)
     model.fit(X_train, y_train)
-    
-    # Sınıf tahmini
-    y_pred = model.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
-    
-    # Olasılık tahmini
-    y_pred_prob = model.predict_proba(X_test)[:,1]
-    
-    # Sonuç DataFrame
-    sonuc = X_test.copy()
+
+    y_pred_prob = model.predict_proba(X_test)[:,1] # predict_proba:iki sınıfın (0 ve 1) olasılıklarından sadece 1 sınıfının olasılıklarını alır
+    sonuc = X_test.copy()  # Test verisinin bir kopyasını alıyoruz 
+
     for col in ["OS Name and Version", "Device Type"]:
-        sonuc[col] = encoders[col].inverse_transform(sonuc[col+'_enc'])
-    sonuc['login_olasilik'] = y_pred_prob*100
-    
-    print("---- OS/Device Bazlı Login Olasılıkları ----")
-    print(f"Model Doğruluk Oranı: {accuracy:.4f}")
-    
+        sonuc[col] = encoders[col].inverse_transform(sonuc[col+'_enc'])  # Encode ettiğimiz sütunları tekrar orijinal isimlerine çeviriyoruz
+    # inverse_transform → sayısal kodları geri dönüştürüp gerçek isimleri elde eder
+
+    sonuc['login_olasilik'] = y_pred_prob * 100  # sonuc tablosuna “login_olasilik” adlı yeni bir sütun ekliyoruz ve tahmin edilen olasılıkları %’ye çeviriyoruz
+    # yani örn. 0.87 olasılığını 87.0 olarak kaydediyoruz
+
+    print("---- OS/Device Bazlı Login Olasılıkları ----")  
     mse = mean_squared_error(y_test, y_pred_prob)
+
     rmse = np.sqrt(mse)
-    print(f"Model Hatası (RMSE): {rmse:.4f}")
-    
+    print(f"Model Hatası (RMSE): {rmse:.4f}") 
     print(sonuc[["OS Name and Version", "Device Type", "login_olasilik"]].head(20))
 
 def saat_gun_model(df):
+
     cols = ['gun','saat'] + [col+'_enc' for col in ["OS Name and Version", "Device Type", "Browser Name and Version"]]
     login_counts = df.groupby(cols).size().reset_index(name='login_sayisi')
+
+    # 1️⃣ NORMAL RANDOM SPLIT MODEL
 
     X = login_counts[cols]
     y = login_counts['login_sayisi']
@@ -85,19 +80,16 @@ def saat_gun_model(df):
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     model = RandomForestRegressor(
-        n_estimators=1500,       # Çok sayıda ağaç → daha stabil tahmin
-        max_depth=40,         # Sınırsız derinlik → veri detaylarını yakalama
-        min_samples_split=2,    # Dallanmada minimum örnek → daha hassas ağaçlar
-        min_samples_leaf=1,     # Yaprakta minimum örnek → nadir olayları yakalar
+        n_estimators=1500,
+        max_depth=40,
+        min_samples_split=2,
+        min_samples_leaf=1,
         random_state=42,
-        n_jobs=-1               # Tüm çekirdekleri kullan
+        n_jobs=-1
     )
     model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-    
-    # Clip düzeltmesi
-    y_pred = np.clip(y_pred, a_min=0, a_max=None)
-    
+    y_pred = np.clip(model.predict(X_test), a_min=0, a_max=None)
+
     sonuc = X_test.copy()
     sonuc['gercek_login'] = y_test.values
     sonuc['tahmini_login'] = np.round(y_pred).astype(int)
@@ -125,7 +117,6 @@ def saat_gun_model(df):
     print("\n--- EN YOĞUN 10 GÜN+SAAT KOMBİNASYONU ---")
     print(gun_saat_bazli.head(10)[['gun_ismi','saat','gercek_login','tahmini_login','mutlak_hata','hata_%']].to_string(index=False))
 
-    # En yoğun 10 tahmini çıkarmak
     sonuc_en_yogun = sonuc.groupby(['gun_ismi','saat','OS Name and Version','Device Type','Browser Name and Version']) \
                           .agg({'tahmini_login':'sum','gercek_login':'sum'}) \
                           .reset_index() \
@@ -134,62 +125,212 @@ def saat_gun_model(df):
     print("\n--- ÖRNEK 10 TAHMİN (EN YOĞUN) ---")
     print(sonuc_en_yogun.head(10)[['gun_ismi','saat','OS Name and Version','Device Type','Browser Name and Version','gercek_login','tahmini_login']].to_string(index=False))
 
+    # ======================================================
+    # 2️⃣ EZBER KONTROLÜ (ZAMAN BAZLI TRAIN-TEST AYRIMI)
+    # ======================================================
+    gun_sirasi = login_counts['gun'].unique()
+    gun_sirasi.sort()  # 0=Pts, 6=Paz vb.
+    bolme_nokta = int(len(gun_sirasi) * 0.8)
+
+    train_days = gun_sirasi[:bolme_nokta]
+    test_days = gun_sirasi[bolme_nokta:]
+
+    train_df = login_counts[login_counts['gun'].isin(train_days)]
+    test_df = login_counts[login_counts['gun'].isin(test_days)]
+
+    X_train2 = train_df[cols]
+    y_train2 = train_df['login_sayisi']
+    X_test2 = test_df[cols]
+    y_test2 = test_df['login_sayisi']
+
+    model2 = RandomForestRegressor(
+    n_estimators=200,
+    max_depth=10,
+    min_samples_split=5,
+    random_state=42
+)
+
+    model2.fit(X_train2, y_train2)
+    y_pred2 = np.clip(model2.predict(X_test2), a_min=0, a_max=None)
+
+    rmse2 = np.sqrt(mean_squared_error(y_test2, y_pred2))
+    print("\n🧠 EZBER KONTROLÜ (Zaman Bazlı Test)")
+    print(f"Geçmiş günlerle eğitilip geleceği tahmin etti → RMSE: {rmse2:.2f}")
+
+    fark_orani = ((rmse2 - rmse) / rmse) * 100
+    print(f"Fark Oranı: %{fark_orani:.2f} (yüksekse model biraz ezberliyor olabilir)")
+
     return gun_saat_bazli
 
 def haftalik_login_tahmini(df):
-     # Günlük login sayıları
-    gunluk_logins = df.groupby(df['Login Timestamp'].dt.date).size().reset_index(name='y')
-    gunluk_logins['ds'] = pd.to_datetime(gunluk_logins['Login Timestamp'])
+    # --- 1️⃣ Veri Hazırlığı ---
+    df = df.copy()
+    df = df.dropna(subset=['Login Timestamp'])
+    df['Login Timestamp'] = pd.to_datetime(df['Login Timestamp'], errors='coerce')
 
-    # Eksik tarihleri doldur
-    tarih_araligi = pd.date_range(start=gunluk_logins['ds'].min(), end=gunluk_logins['ds'].max())
-    gunluk_logins = gunluk_logins.set_index('ds').reindex(tarih_araligi, fill_value=0).rename_axis('ds').reset_index()
+    haftalik_logins = (
+        df.set_index('Login Timestamp')
+          .resample('W-MON')['Login Successful']
+          .sum()
+          .reset_index()
+    )
+    haftalik_logins.rename(columns={'Login Successful': 'y', 'Login Timestamp': 'ds'}, inplace=True)
 
-    if len(gunluk_logins) < 14:
-        print("Yeterli veri yok, tahmin üretilemiyor.")
+    # Veri filtreleme
+    ortalama = haftalik_logins['y'].median()
+    haftalik_logins = haftalik_logins[
+        (haftalik_logins['y'] > ortalama * 0.3) &
+        (haftalik_logins['y'] > 10000)
+    ].reset_index(drop=True)
+
+    print(f"✓ Toplam hafta: {len(haftalik_logins)}")
+    print(f"✓ Tarih: {haftalik_logins['ds'].min()} → {haftalik_logins['ds'].max()}\n")
+
+    if len(haftalik_logins) < 4:
+        print("❌ Yeterli veri yok")
         return
 
-    # Log dönüşümü
-    gunluk_logins['y'] = np.log1p(gunluk_logins['y'])
+    haftalik_logins['gercek_login'] = haftalik_logins['y'].astype(int)
 
-    # Prophet modeli
-    prophet_model = Prophet(
-        daily_seasonality=True,
+    # --- 2️⃣ PROPHET - 1 Hafta İleri Tahmin ---
+    logging.getLogger('cmdstanpy').setLevel(logging.ERROR)
+    prophet_tahminler = []
+    min_train_weeks = 3
+
+    for i in range(len(haftalik_logins)):
+        if i < min_train_weeks:
+            prophet_tahminler.append(None)
+            continue
+
+        train_data = haftalik_logins.iloc[:i].copy()
+        train_data['y_log'] = np.log1p(train_data['y'])
+
+        model = Prophet(
+            weekly_seasonality=False,
+            daily_seasonality=False,
+            yearly_seasonality=False,
+            seasonality_mode='additive',
+            changepoint_prior_scale=0.5
+        )
+        model.fit(train_data[['ds', 'y_log']].rename(columns={'y_log': 'y'}))
+
+        gelecek_tarih = train_data['ds'].max() + pd.Timedelta(weeks=1)
+        future = pd.DataFrame({'ds': [gelecek_tarih]})
+        tahmin = model.predict(future)
+        tahmin_deger = int(round(np.expm1(tahmin['yhat'].values[0])))
+        prophet_tahminler.append(tahmin_deger)
+
+    haftalik_logins['tahmini_login'] = prophet_tahminler
+
+    # --- 3️⃣ KALMAN - 1 Hafta İleri (Trendli) ---
+    gercek_degerler = haftalik_logins['gercek_login'].values
+    kalman_tahminler = []
+
+    for i in range(len(gercek_degerler)):
+        if i < min_train_weeks:
+            kalman_tahminler.append(None)
+            continue
+
+        train_values = gercek_degerler[:i]
+
+        # 🔹 Trendli Kalman: Değer + Trend Bileşeni
+        kf = KalmanFilter(
+            transition_matrices=[[1, 1], [0, 1]],
+            observation_matrices=[[1, 0]],
+            initial_state_mean=[train_values[0], 0],
+            transition_covariance=np.eye(2) * 0.01,
+            observation_covariance=1.0
+        )
+
+        state_means, state_covs = kf.filter(train_values)
+        pred_state = kf.transition_matrices @ state_means[-1]
+        tahmin = pred_state[0]
+        kalman_tahminler.append(int(round(tahmin)))
+
+    haftalik_logins['kalman_tahmin'] = kalman_tahminler
+
+    # --- 4️⃣ HATA HESAPLARI ---
+    haftalik_logins_valid = haftalik_logins[
+        haftalik_logins['tahmini_login'].notna() &
+        haftalik_logins['kalman_tahmin'].notna()
+    ].copy()
+
+    haftalik_logins_valid['mutlak_hata'] = abs(
+        haftalik_logins_valid['tahmini_login'] - haftalik_logins_valid['gercek_login']
+    ).astype(int)
+    haftalik_logins_valid['kalman_hata'] = abs(
+        haftalik_logins_valid['kalman_tahmin'] - haftalik_logins_valid['gercek_login']
+    ).astype(int)
+    haftalik_logins_valid['hata_%'] = (haftalik_logins_valid['mutlak_hata'] / haftalik_logins_valid['gercek_login']) * 100
+    haftalik_logins_valid['kalman_hata_%'] = (haftalik_logins_valid['kalman_hata'] / haftalik_logins_valid['gercek_login']) * 100
+
+    prophet_rmse = np.sqrt(mean_squared_error(
+        haftalik_logins_valid['gercek_login'], haftalik_logins_valid['tahmini_login']
+    ))
+    kalman_rmse = np.sqrt(mean_squared_error(
+        haftalik_logins_valid['gercek_login'], haftalik_logins_valid['kalman_tahmin']
+    ))
+
+    print(f"Prophet (1 Hafta İleri) RMSE: {prophet_rmse:,.2f}")
+    print(f"Kalman (1 Hafta İleri - Trendli) RMSE:   {kalman_rmse:,.2f}\n")
+
+    # --- 5️⃣ SONUÇ TABLOSU ---
+    sonuc = haftalik_logins_valid[['ds', 'gercek_login', 'tahmini_login', 'kalman_tahmin',
+                                   'mutlak_hata', 'kalman_hata', 'hata_%', 'kalman_hata_%']].copy()
+    sonuc['hata_%'] = sonuc['hata_%'].round(2)
+    sonuc['kalman_hata_%'] = sonuc['kalman_hata_%'].round(2)
+    pd.options.display.float_format = '{:.2f}'.format
+
+    print("=" * 100)
+    print(sonuc.to_string(index=False))
+    print("=" * 100)
+    print(f"\n📊 Prophet Ortalama Hata: %{sonuc['hata_%'].mean():.2f}")
+    print(f"📊 Kalman Ortalama Hata:   %{sonuc['kalman_hata_%'].mean():.2f}")
+
+    # --- 6️⃣ 52 HAFTALIK İLERİ TAHMİN ---
+    gelecek_haftalar = 52  # 🔹 1 yıl ileri tahmin
+
+    # Prophet
+    final_model = Prophet(
         weekly_seasonality=True,
-        yearly_seasonality=False,
+        daily_seasonality=False,
+        yearly_seasonality=True,
         seasonality_mode='additive',
-        changepoint_prior_scale=0.05
+        changepoint_prior_scale=0.5
     )
-    prophet_model.fit(gunluk_logins[['ds', 'y']])
+    final_model.fit(haftalik_logins[['ds', 'y']])
+    son_tarih = haftalik_logins['ds'].max()
+    gelecek_tarihler = pd.date_range(start=son_tarih + pd.Timedelta(weeks=1),
+                                     periods=gelecek_haftalar, freq='W-MON')
+    future_df = pd.DataFrame({'ds': gelecek_tarihler})
+    gelecek_tahmin = final_model.predict(future_df)
+    gelecek_tahmin['prophet_tahmin'] = gelecek_tahmin['yhat'].round().astype(int)
 
-    # Tahmin
-    tahmin = prophet_model.predict(gunluk_logins[['ds']])
-    tahmin['yhat_real'] = np.expm1(tahmin['yhat'])
+    # Kalman (Trendli - 52 hafta ileri)
+    kalman_gelecek = []
+    train_values = gercek_degerler
+    kf = KalmanFilter(
+        transition_matrices=[[1, 1], [0, 1]],
+        observation_matrices=[[1, 0]],
+        initial_state_mean=[train_values[0], 0],
+        transition_covariance=np.eye(2) * 0.01,
+        observation_covariance=1.0
+    )
+    state_means, state_covs = kf.filter(train_values)
+    pred_state = state_means[-1]
+    for _ in range(gelecek_haftalar):
+        pred_state = kf.transition_matrices @ pred_state
+        kalman_gelecek.append(int(round(pred_state[0])))
 
-    # Gerçek ve tahmini login
-    gunluk_logins['tahmini_login'] = tahmin['yhat_real'].round().astype(int)
-    gunluk_logins['gercek_login'] = np.expm1(gunluk_logins['y'])
+    gelecek_sonuc = pd.DataFrame({
+        'Tarih': gelecek_tarihler,
+        'Prophet_Tahmin': gelecek_tahmin['prophet_tahmin'].values,
+        'Kalman_Tahmin': kalman_gelecek
+    })
+    print("\n📅 --- 52 HAFTALIK GELECEK TAHMİN ---")
+    print(gelecek_sonuc.to_string(index=False))
 
-    # Haftalık toplamlar
-    gunluk_logins['ds'] = pd.to_datetime(gunluk_logins['ds'])
-    haftalik = gunluk_logins[['ds', 'gercek_login', 'tahmini_login']].resample('W-MON', on='ds').sum().reset_index()
-
-    # İlk haftayı kaldır (yeterli veri yok)
-    if len(haftalik) > 1:
-        haftalik = haftalik.iloc[1:].reset_index(drop=True)
-
-    # Hata hesapları
-    haftalik['mutlak_hata'] = abs(haftalik['tahmini_login'] - haftalik['gercek_login'])
-    haftalik['hata_%'] = (haftalik['mutlak_hata'] / np.maximum(haftalik['gercek_login'], 1)) * 100
-
-    # RMSE
-    rmse = np.sqrt(mean_squared_error(haftalik['gercek_login'], haftalik['tahmini_login']))
-    print(f"Model Hatası (RMSE - Haftalık): {rmse:.2f}\n")
-
-    # Tabloyu ekrana yazdır
-    print(haftalik[['ds', 'gercek_login', 'tahmini_login', 'mutlak_hata', 'hata_%']])
-
-    return haftalik[['ds', 'gercek_login', 'tahmini_login', 'mutlak_hata', 'hata_%']]
+    return sonuc
 
 def os_4haftalik_tahmin(df):
     populer_os = df["OS Name and Version"].value_counts().head(3).index.tolist()
@@ -395,7 +536,7 @@ while True:
     )
     if secim == '1': os_device_model(df)
     elif secim == '2': saat_gun_model(df)
-    elif secim == '3': haftalik_login_tahmini(df)
+    elif secim == '3': haftalik_login_tahmini(df_2020)
     elif secim == '4': os_4haftalik_tahmin(df)
     elif secim == '5': anomali_tespiti(df)
     elif secim == '6': benzer_login_siniflandir(df)
