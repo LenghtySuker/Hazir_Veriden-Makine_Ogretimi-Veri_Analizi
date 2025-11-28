@@ -14,50 +14,55 @@ Bu proje, kullanıcı login verileri üzerinden makine öğrenmesi modelleri ile
 
 
 
-Aşağıdaki 7 sabit özellik üzerine analiz ve tahminler yapılmıştır:
+Aşağıdaki 8 sabit özellik üzerine analiz ve tahminler yapılmıştır:
 
 
-
-1\. \*\*OS/Device Bazlı Tahmin\*\*  
-
-2\. \*\*Saat/Gün Bazlı Tahmin Ve En Yoğun 10 Gün ve Saati Verisi\*\*  
-
-3\. \*\*Gelecek Hafta Tahmini\*\*  
-
-4\. \*\*OS/Device Bazlı Login Sayısı Tahmini (Zaman Serisi)\*\*  
-
-5\. \*\*Anomali Tespiti\*\*  
-
-6\. \*\*Benzer Login Davranışları\*\*
-
+1- OS / Browser Yoğunluk Analizi
+2- Client Analizi
+3- Saat / Gün Tahmini
+4- Haftalık Login Tahmini
+5- Gelecek Hafta Login Tahmini(Sistemi her çalıştırdığımızda o tarihten 1 yıllık gelecek tahmini)
+6- OS 4 Haftalık Tahmin
+7- Anomali Tespiti
+8- Login Kümeleme Analizi
 
 
 \## 🧪 Kullanılan Kütüphaneler
+---
 
+## Bu projede kullanılan Python kütüphaneleri
 
+- **Veri İşleme ve Analiz**
+  - `pandas`, `numpy`: Veri işleme ve sayısal analiz  
+  - `polars`: Alternatif hızlı veri işleme (opsiyonel, varsa)  
 
-Bu projede aşağıdaki Python kütüphaneleri kullanılmıştır:
+- **Makine Öğrenmesi ve Modelleme**
+  - `scikit-learn`:  
+    - `train_test_split`: Eğitim/test bölme  
+    - `LabelEncoder`, `StandardScaler`: Ön işleme  
+    - `IsolationForest`: Anomali tespiti  
+    - `KMeans`: Kullanıcı davranışı kümeleme  
+    - `mean_squared_error`, `silhouette_score`, `davies_bouldin_score`, `r2_score`: Model değerlendirme metrikleri  
+  - `lightgbm`: Gradient boosting tabanlı tahmin modelleri  
+  - `xgboost`, `XGBRegressor`: Güçlü tahmin modelleri (boosting algoritmaları)  
+  - `torch`: GPU desteği kontrolü  
 
+- **Zaman Serisi Analizi**
+  - `prophet`: Zaman serisi tahmini  
+  - `statsmodels` (`SARIMAX`): Zaman serisi modelleme  
 
+- **Sistem ve Yardımcı Araçlar**
+  - `logging`: Uyarı ve hata mesajlarını bastırma  
+  - `warnings`: Uyarı filtreleme  
+  - `sys`, `pathlib.Path`: Sistem ve dosya işlemleri  
+  - `datetime`, `timedelta`, `date`: Tarih/zaman işlemleri  
+  - `itertools`: Kombinasyon ve iterasyon işlemleri  
 
-\- `pandas`, `numpy`: Veri işleme ve sayısal analiz  
+- **Dış Kaynaklar ve API**
+  - `requests`: HTTP istekleri  
+  - `feedparser`: RSS/Atom veri çekme  
 
-\- `scikit-learn`:  
-
-&nbsp; - `train\_test\_split`: Eğitim/test bölme  
-
-&nbsp; - `LabelEncoder`, `StandardScaler`: Ön işleme  
-
-&nbsp; - `RandomForestClassifier`, `RandomForestRegressor`, `IsolationForest`: Tahmin ve anomali tespiti  
-
-&nbsp; - `KMeans`: Kullanıcı davranışı kümeleme  
-
-\- `prophet`: Zaman serisi tahmini  
-
-\- `logging`: Uyarı ve hata mesajlarını bastırma
-
-
-
+---
 
 
 Login tahminleri haftalık olarak görselleştirilmiştir. Grafikler `matplotlib` ve `seaborn` ile oluşturulmuştur. Prophet ve cmdstanpy kütüphanelerinden gelen uyarılar bastırılarak terminal çıktısı sade tutulmuştur.
